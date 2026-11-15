@@ -138,3 +138,19 @@ with smoothly animated marker, route, ETA, call agent, share link), public track
 - Hindi uses a small dictionary provider, not next-intl yet; many inner labels are still English only.
 - Cart judges loan-kit availability for today; checkout re-checks for the actual surgery date.
 - OTP limit is 5 per number per 15 min; during heavy testing clear `"OtpCode"` in the dev DB.
+
+## 2026-11-15 — Bootstrap, founder section, GitHub Pages
+- Bootstrap 5.3.9 in FE/web. CSS layer order: Tailwind base < `bootstrap` < components < Tailwind utilities
+  (`scripts/vendor-bootstrap.mjs` strips `@charset` so it can live in a layer). Bootstrap JS loaded client-side.
+  Used for: landing carousel, founder card (grid), FAQ accordion, footer grid, home banner carousel.
+- Founder section (landing + new `/about`): Rakesh Maradiya, Founder & Owner. Photo cropped from the owner's
+  Instagram screenshot to show only him (`public/owner/rakesh-maradiya.jpg`); replace with a proper portrait later.
+- Static export for GitHub Pages: dynamic routes became query pages — `/product?slug=`, `/category?slug=`,
+  `/kit?slug=`, `/order?id=`, `/track?t=`. `NEXT_PUBLIC_API_BASE` (backend URL) and `NEXT_PUBLIC_BASE_PATH`.
+  `scripts/flatten-rsc.mjs` fixes Next 16 prefetch file names for static hosts. Workflow `.github/workflows/pages.yml`
+  deploys FE/web on every push to main. Backend: `PUBLIC_WEB_URL` for tracking links, CORS allows the Pages origin.
+- Verified: Pages-style build served under `/OrthoDiamondSystem/` → 16 checks (photo, Bootstrap carousel/accordion/
+  buttons, routing, live API data, 0 JS errors); responsive 11 pages × 360/768/1366 px, no horizontal scroll;
+  full local flow 28/28 again; BE 33/33.
+- Public site needs a public backend: set repo variable `API_BASE` (e.g. ngrok static domain or a VPS URL) and
+  re-run the workflow. Until then the public site shows company info and "server not reachable" for live data.
