@@ -1,0 +1,697 @@
+// Ortho Diamond — data model (docs/SPEC.md §3)
+// Money = integer paise. Dates = UTC.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────── Enums ─────────────
+
+enum Role {
+  SUPER_ADMIN
+  STAFF
+  DELIVERY_AGENT
+  DOCTOR
+  HOSPITAL_PURCHASE
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum KitType {
+  SALE
+  LOAN
+}
+
+enum SterilisationStatus {
+  STERILE
+  PENDING
+  IN_PROCESS
+  NOT_REQUIRED
+}
+
+enum OrderStatus {
+  PLACED
+  ACCEPTED
+  REJECTED
+  PACKED
+  DISPATCHED
+  REACHED_HOSPITAL
+  DELIVERED_TO_OT
+  KIT_RETURN_PENDING
+  KIT_RETURNED
+  CLOSED
+  CANCELLED
+}
+
+enum OrderPriority {
+  EMERGENCY
+  SCHEDULED
+}
+
+enum PaymentMode {
+  HOSPITAL_CREDIT
+  PAY_ON_DELIVERY
+  UPI_TEST
+}
+
+enum NotificationChannel {
+  WHATSAPP
+  SMS
+  FCM
+  IN_APP
+  CONSOLE
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+enum AiMessageRole {
+  SYSTEM
+  USER
+  ASSISTANT
+  TOOL
+}
+
+enum AiActionStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  EXECUTED
+  FAILED
+  EXPIRED
+}
+
+enum DevicePlatform {
+  ANDROID
+  WEB
+}
+
+// ───────────── Identity & auth ─────────────
+
+model User {
+  id          String    @id @default(uuid())
+  phone       String    @unique // E.164, e.g. +919876543210
+  name        String
+  email       String?
+  role        Role
+  isActive    Boolean   @default(true)
+  hospitalId  String? // HOSPITAL_PURCHASE users belong to one hospital
+  hospital    Hospital? @relation(fields: [hospitalId], references: [id])
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  doctor           Doctor?              @relation("DoctorUser")
+  deliveryAgent    DeliveryAgent?
+  refreshTokens    RefreshToken[]
+  cart             Cart?
+  ordersPlaced     Order[]              @relation("OrderPlacedBy")
+  statusChanges    OrderStatusHistory[]
+  stockAlerts      StockAlert[]
+  notifications    Notification[]
+  auditLogs        AuditLog[]
+  aiConversations  AiConversation[]
+  aiActions        AiPendingAction[]
+  deviceTokens     DeviceToken[]
+  stockAdjustments StockAdjustment[]
+  doctorsReviewed  Doctor[]             @relation("DoctorReviewer")
+
+  @@index([role])
+}
+
+model OtpCode {
+  id         String    @id @default(uuid())
+  phone      String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model RefreshToken {
+  id           String    @id @default(uuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String    @unique
+  familyId     String // all rotations of one login share a family; reuse => whole family revoked
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model DeviceToken {
+  id        String         @id @default(uuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String         @unique
+  platform  DevicePlatform
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+// ───────────── People ─────────────
+
+model Doctor {
+  id              String         @id @default(uuid())
+  userId          String         @unique
+  user            User           @relation("DoctorUser", fields: [userId], references: [id], onDelete: Cascade)
+  fullName        String
+  email           String
+  specialisation  String
+  councilRegNo    String
+  stateCouncil    String
+  certificatePath String? // relative path inside uploads/private
+  status          ApprovalStatus @default(PENDING)
+  rejectReason    String?
+  reviewedById    String?
+  reviewedBy      User?          @relation("DoctorReviewer", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  hospitals DoctorHospital[]
+  orders    Order[]
+
+  @@unique([stateCouncil, councilRegNo])
+  @@index([status])
+}
+
+model DoctorHospital {
+  doctorId   String
+  hospitalId String
+  doctor     Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  @@id([doctorId, hospitalId])
+}
+
+model DeliveryAgent {
+  id         String    @id @default(uuid())
+  userId     String    @unique
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicleNo  String
+  isOnDuty   Boolean   @default(false)
+  lastLat    Float?
+  lastLng    Float?
+  lastSeenAt DateTime?
+
+  orders    Order[]
+  locations DeliveryLocation[]
+}
+
+model Hospital {
+  id               String   @id @default(uuid())
+  name             String
+  address          String
+  lat              Float
+  lng              Float
+  otContactName    String
+  otContactPhone   String
+  gstin            String?
+  creditLimitPaise Int      @default(0)
+  paymentTermsDays Int      @default(30)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  doctors DoctorHospital[]
+  buyers  User[]
+  orders  Order[]
+}
+
+// ───────────── Catalogue ─────────────
+
+model Category {
+  id        String     @id @default(uuid())
+  name      String
+  slug      String     @unique
+  parentId  String?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryTree")
+  icon      String?
+  image     String?
+  sortOrder Int        @default(0)
+  isActive  Boolean    @default(true)
+  products  Product[]
+
+  @@index([parentId, sortOrder])
+}
+
+model Brand {
+  id       String    @id @default(uuid())
+  name     String    @unique
+  country  String?
+  products Product[]
+}
+
+model Material {
+  id       String           @id @default(uuid())
+  name     String           @unique // e.g. "Titanium Ti-6Al-4V"
+  code     String           @unique // e.g. "TI", "SS"
+  variants ProductVariant[]
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id])
+  brandId     String?
+  brand       Brand?   @relation(fields: [brandId], references: [id])
+  description String   @default("")
+  images      String[]
+  hsnCode     String
+  gstPercent  Int // 5 / 12 / 18
+  isSterile   Boolean  @default(false)
+  tags        String[]
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  variants ProductVariant[]
+
+  @@index([categoryId])
+  @@index([brandId])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Product_name_trgm_idx")
+}
+
+model ProductVariant {
+  id                String    @id @default(uuid())
+  sku               String    @unique
+  productId         String
+  product           Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// { diameterMm, lengthMm, holes, side: "L"|"R", angle, threadType }
+  attributes        Json      @default("{}")
+  materialId        String?
+  material          Material? @relation(fields: [materialId], references: [id])
+  pricePaise        Int
+  mrpPaise          Int
+  lowStockThreshold Int       @default(5)
+  reservedQty       Int       @default(0) // held by PLACED/ACCEPTED/PACKED orders
+  barcode           String?   @unique
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  batches       StockBatch[]
+  adjustments   StockAdjustment[]
+  kitItems      KitItem[]
+  templateItems ProcedureTemplateItem[]
+  cartItems     CartItem[]
+  orderItems    OrderItem[]
+  stockAlerts   StockAlert[]
+
+  @@index([productId])
+  @@index([materialId])
+  @@index([attributes(ops: JsonbPathOps)], type: Gin)
+}
+
+// ───────────── Stock ─────────────
+
+model StockBatch {
+  id         String         @id @default(uuid())
+  variantId  String
+  variant    ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  lotNo      String
+  qty        Int
+  expiryDate DateTime? // required for sterile items
+  receivedAt DateTime       @default(now())
+  supplier   String?
+
+  adjustments StockAdjustment[]
+
+  @@unique([variantId, lotNo])
+  @@index([variantId, expiryDate])
+  @@index([expiryDate])
+}
+
+model StockAdjustment {
+  id        String         @id @default(uuid())
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  batchId   String?
+  batch     StockBatch?    @relation(fields: [batchId], references: [id])
+  delta     Int
+  reason    String
+  orderId   String?
+  actorId   String?
+  actor     User?          @relation(fields: [actorId], references: [id])
+  createdAt DateTime       @default(now())
+
+  @@index([variantId, createdAt])
+}
+
+// ───────────── Kits & templates ─────────────
+
+model OperationKit {
+  id                  String              @id @default(uuid())
+  name                String
+  slug                String              @unique
+  description         String              @default("")
+  type                KitType
+  trayPhotos          String[]
+  rentalChargePaise   Int                 @default(0)
+  salePricePaise      Int                 @default(0)
+  physicalSets        Int                 @default(1)
+  sterilisationStatus SterilisationStatus @default(STERILE)
+  isActive            Boolean             @default(true)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  contents   KitItem[]
+  bookings   KitBooking[]
+  templates  ProcedureTemplate[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+}
+
+model KitItem {
+  id        String         @id @default(uuid())
+  kitId     String
+  kit       OperationKit   @relation(fields: [kitId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  qty       Int
+
+  @@unique([kitId, variantId])
+}
+
+model KitBooking {
+  id               String       @id @default(uuid())
+  kitId            String
+  kit              OperationKit @relation(fields: [kitId], references: [id])
+  orderId          String
+  order            Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  surgeryAt        DateTime
+  dispatchedAt     DateTime?
+  expectedReturnAt DateTime?
+  returnedAt       DateTime?
+  /// [{ variantId, qty }]
+  usedItems        Json?
+  /// [{ variantId, qty }]
+  missingItems     Json?
+  createdAt        DateTime     @default(now())
+
+  @@index([kitId, surgeryAt])
+  @@index([orderId])
+}
+
+model ProcedureTemplate {
+  id          String        @id @default(uuid())
+  name        String        @unique // e.g. "Distal Radius ORIF"
+  description String        @default("")
+  kitId       String?
+  kit         OperationKit? @relation(fields: [kitId], references: [id])
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  items ProcedureTemplateItem[]
+}
+
+model ProcedureTemplateItem {
+  id         String            @id @default(uuid())
+  templateId String
+  template   ProcedureTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  variantId  String
+  variant    ProductVariant    @relation(fields: [variantId], references: [id])
+  qty        Int
+
+  @@unique([templateId, variantId])
+}
+
+// ───────────── Cart & orders ─────────────
+
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String     @unique
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt DateTime   @updatedAt
+  items     CartItem[]
+}
+
+model CartItem {
+  id        String          @id @default(uuid())
+  cartId    String
+  cart      Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
+  kitId     String?
+  kit       OperationKit?   @relation(fields: [kitId], references: [id])
+  qty       Int
+  createdAt DateTime        @default(now())
+
+  @@index([cartId])
+}
+
+model Order {
+  id                   String         @id @default(uuid())
+  orderNo              String         @unique // OD-YYMMDD-XXXX
+  placedById           String
+  placedBy             User           @relation("OrderPlacedBy", fields: [placedById], references: [id])
+  doctorId             String? // set when the treating doctor is a registered doctor
+  doctor               Doctor?        @relation(fields: [doctorId], references: [id])
+  treatingDoctorName   String
+  treatingDoctorPhone  String
+  hospitalId           String
+  hospital             Hospital       @relation(fields: [hospitalId], references: [id])
+  /// { name, age, gender, uhid, procedure, side, notes }
+  patient              Json
+  surgeryAt            DateTime
+  priority             OrderPriority
+  deliveryAddress      String
+  deliveryLat          Float
+  deliveryLng          Float
+  deliveryContactName  String
+  deliveryContactPhone String
+  subtotalPaise        Int
+  gstPaise             Int
+  totalPaise           Int
+  paymentMode          PaymentMode
+  attachments          String[] // private upload paths (X-rays)
+  assignedAgentId      String?
+  assignedAgent        DeliveryAgent? @relation(fields: [assignedAgentId], references: [id])
+  status               OrderStatus    @default(PLACED)
+  rejectReason         String?
+  idempotencyKey       String         @unique
+  invoicePath          String?
+  challanPath          String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  items         OrderItem[]
+  kitBookings   KitBooking[]
+  statusHistory OrderStatusHistory[]
+  locations     DeliveryLocation[]
+  proof         DeliveryProof?
+
+  @@index([status, createdAt])
+  @@index([placedById, createdAt])
+  @@index([doctorId, createdAt])
+  @@index([hospitalId, createdAt])
+  @@index([assignedAgentId, status])
+}
+
+model OrderItem {
+  id             String          @id @default(uuid())
+  orderId        String
+  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variantId      String?
+  variant        ProductVariant? @relation(fields: [variantId], references: [id])
+  kitId          String?
+  kit            OperationKit?   @relation(fields: [kitId], references: [id])
+  description    String // snapshot of the display name at order time
+  sku            String?
+  hsnCode        String
+  qty            Int
+  unitPricePaise Int
+  gstPercent     Int
+  lineTotalPaise Int
+
+  @@index([orderId])
+}
+
+model OrderStatusHistory {
+  id      String       @id @default(uuid())
+  orderId String
+  order   Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  from    OrderStatus?
+  to      OrderStatus
+  actorId String?
+  actor   User?        @relation(fields: [actorId], references: [id])
+  reason  String?
+  at      DateTime     @default(now())
+
+  @@index([orderId, at])
+}
+
+model DeliveryLocation {
+  id      String        @id @default(uuid())
+  agentId String
+  agent   DeliveryAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  orderId String?
+  order   Order?        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  lat     Float
+  lng     Float
+  speed   Float?
+  heading Float?
+  at      DateTime      @default(now())
+
+  @@index([orderId, at])
+  @@index([agentId, at])
+}
+
+model DeliveryProof {
+  id           String   @id @default(uuid())
+  orderId      String   @unique
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  receiverName String
+  signatureUrl String
+  photoUrl     String?
+  at           DateTime @default(now())
+}
+
+// ───────────── Notifications, settings, audit ─────────────
+
+model StockAlert {
+  id         String         @id @default(uuid())
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  variantId  String
+  variant    ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  createdAt  DateTime       @default(now())
+  notifiedAt DateTime?
+
+  @@unique([userId, variantId])
+  @@index([variantId, notifiedAt])
+}
+
+model Notification {
+  id        String              @id @default(uuid())
+  userId    String? // null = owner/admin broadcast
+  user      User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel   NotificationChannel
+  recipient String? // phone number / device token for external channels
+  template  String?
+  title     String
+  body      String
+  payload   Json?
+  status    NotificationStatus  @default(QUEUED)
+  error     String?
+  attempts  Int                 @default(0)
+  readAt    DateTime?
+  sentAt    DateTime?
+  createdAt DateTime            @default(now())
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model OwnerContact {
+  id             String   @id @default(uuid())
+  name           String
+  whatsappNumber String   @unique
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+}
+
+model Banner {
+  id        String    @id @default(uuid())
+  title     String
+  imageUrl  String
+  linkUrl   String?
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  startsAt  DateTime?
+  endsAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  action    String // e.g. "doctor.approve", "ai.tool.adjust_stock"
+  entity    String
+  entityId  String?
+  before    Json?
+  after     Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+}
+
+// ───────────── Diamond AI ─────────────
+
+model AiConversation {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages AiMessage[]
+  actions  AiPendingAction[]
+
+  @@index([userId, updatedAt])
+}
+
+model AiMessage {
+  id             String         @id @default(uuid())
+  conversationId String
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           AiMessageRole
+  content        String
+  toolCalls      Json?
+  createdAt      DateTime       @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model AiPendingAction {
+  id             String         @id @default(uuid())
+  conversationId String
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tool           String
+  args           Json
+  summary        String
+  status         AiActionStatus @default(PENDING)
+  result         Json?
+  expiresAt      DateTime
+  createdAt      DateTime       @default(now())
+
+  @@index([userId, status])
+}

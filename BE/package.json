@@ -1,0 +1,56 @@
+{
+  "name": "ortho-diamond-backend",
+  "version": "1.0.0",
+  "description": "Ortho Diamond API",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
+    "db:reset": "prisma migrate reset --force"
+  },
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "bullmq": "6.7.6",
+    "express": "4.22.3",
+    "ioredis": "6.0.0",
+    "jsonwebtoken": "9.0.3",
+    "multer": "2.5.0",
+    "pdfkit": "0.20.2",
+    "pino": "10.4.0",
+    "pino-http": "11.0.0",
+    "socket.io": "4.8.4",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/express": "4.17.25",
+    "@types/jsonwebtoken": "9.0.10",
+    "@types/multer": "2.3.0",
+    "@types/node": "26.6.6",
+    "@types/pdfkit": "0.17.7",
+    "@types/supertest": "7.2.1",
+    "eslint": "10.15.0",
+    "pino-pretty": "13.2.0",
+    "prisma": "6.19.3",
+    "socket.io-client": "4.8.4",
+    "supertest": "7.3.2",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.2",
+    "vitest": "5.1.0"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}

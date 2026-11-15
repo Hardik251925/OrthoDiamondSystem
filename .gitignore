@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.local
+dist/
+.next/
+*.log
+BE/uploads/private/*
+BE/uploads/public/*
+!BE/uploads/**/.gitkeep
+# Android (Step 10+)
+Android App/**/build/
+Android App/.gradle/
+Android App/local.properties

@@ -1,0 +1,27 @@
+# Ortho Diamond gateway (Docker). Same routing as scripts/gateway.mjs (used when Docker is not installed).
+# Backend and web run on the host; admin/dist is mounted read-only at /srv/admin.
+{
+	admin off
+	auto_https off
+}
+
+:8100 {
+	encode gzip
+
+	@backend path /api/* /socket.io/* /uploads/*
+	handle @backend {
+		reverse_proxy host.docker.internal:4100
+	}
+
+	redir /admin /admin/ 301
+
+	handle_path /admin/* {
+		root * /srv/admin
+		try_files {path} /index.html
+		file_server
+	}
+
+	handle {
+		reverse_proxy host.docker.internal:3100
+	}
+}
