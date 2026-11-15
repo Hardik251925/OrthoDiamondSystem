@@ -3,6 +3,7 @@
 # Set repository variable API_BASE (Settings > Secrets and variables > Actions > Variables) to the public
 # backend URL, e.g. https://<ngrok-domain>. Without it the site shows "server not reachable" for live data.
 name: Deploy website to GitHub Pages
+# Repo Settings > Pages > Source must be "GitHub Actions".
 
 on:
   push:
